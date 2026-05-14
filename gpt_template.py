@@ -529,7 +529,7 @@ def train_model(
             except StopIteration:
                 train_iter = iter(train_loader)
 
-            x, y = next(train_iter)
+                x, y = next(train_iter)
 
             optimizer.zero_grad()
             logits = model(x)
@@ -566,9 +566,9 @@ def train_model(
 
         history.append({
             "epoch": epoch,
-            "train_loss": train_loss,
-            "val_loss": val_loss,
-            "epoch_time_sec": epoch_time_sec,
+            "train_loss": round(train_loss, 4),
+            "val_loss": round(val_loss, 4),
+            "epoch_time_sec": round(epoch_time_sec, 4),
         })
 
         if epoch in CHECKPOINT_EPOCHS:
@@ -580,17 +580,28 @@ def train_model(
                 "epoch": epoch,
             }
             torch.save(checkpoint, os.path.join(checkpoint_dir, f"gpt_epoch_{epoch}.pt"))
-    log = {
+    log_data = {
         "seed": SEED,
-        "config": config,
+        "config": {
+            "block_size": config["block_size"],
+            "embed_dim": config["embed_dim"],
+            "num_heads": config["num_heads"],
+            "num_layers": config["num_layers"],
+            "mlp_dim": config["mlp_dim"],
+            "dropout": config["dropout"],
+            "lr": config["lr"],
+            "batch_size": config["batch_size"],
+            "epochs": config["epochs"],
+            "steps_per_epoch": config["steps_per_epoch"],
+        },
         "history": history,
-        "final_val_loss": history[-1]["val_loss"] if history else None,
-        "total_params": total_params,
+        "final_val_loss": history[-1]["val_loss"],
+        "total_params": total_params
     }
     with open(log_path, "w") as f:
-        json.dump(log, f, indent=2)
+        json.dump(log_data, f, indent=2)
 
-    return log
+    return log_data
 
 # ---------------------------------------------------------------------------
 # TODO 1.6  generate
