@@ -298,11 +298,39 @@ class GPTBlock(nn.Module):
     ):
         super().__init__()
         # TODO 1.3 – __init__: create norm1, attn, norm2, mlp
-        raise NotImplementedError
+        super().__init__()
+        self.block_size = block_size
+        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+        self.pos_embedding = nn.Embedding(block_size, embed_dim)
+        self.drop = nn.Dropout(dropout)
+        self.blocks = nn.ModuleList([
+            GPTBlock(
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                block_size=block_size,
+                mlp_dim=mlp_dim,
+                dropout=dropout,
+            )
+            for _ in range(num_layers)
+        ])
+        self.norm = nn.LayerNorm(embed_dim)
+        self.head = nn.Linear(embed_dim, vocab_size, bias=False)
+        self.head.weight = self.token_embedding.weight
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # TODO 1.3 – forward: apply pre-norm residual connections
-        raise NotImplementedError
+        B, T = idx.shape
+        assert T <= self.block_size
+        token_emb = self.token_embedding(idx)
+        pos_ids = torch.arange(T, device=idx.device).unsqueeze(0)
+        pos_emb = self.pos_embedding(pos_ids)
+        x = self.drop(token_emb + pos_emb)
+        for block in self.blocks:
+            x = block(x)
+        x = self.norm(x)
+        logits = self.head(x)
+        return logits
 
 
 # ---------------------------------------------------------------------------
