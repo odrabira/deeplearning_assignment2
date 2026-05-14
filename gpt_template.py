@@ -486,8 +486,111 @@ def train_model(
     dict : the training log (same as what is written to log_path)
     """
     # TODO 1.5: implement
-    raise NotImplementedError
+    os.makedirs(checkpoint_dir, exist_ok=True)
 
+    batch_size = config["batch_size"]
+    steps_per_epoch = config["steps_per_epoch"]
+    epochs = config["epochs"]
+    lr = config["lr"]
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=True,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=True,
+    )
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        weight_decay=1e-2,
+    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=epochs,
+    )
+    history = []
+    total_params = sum(p.numel() for p in model.parameters())
+
+    model.train()
+    for epoch in range(1, epochs + 1):
+        epoch_start = time.time()
+        train_iter = iter(train_loader)
+        train_loss_sum = 0.0
+
+        for step in range(steps_per_epoch):
+            try:
+                x, y = next(train_iter)
+            except StopIteration:
+                train_iter = iter(train_loader)
+
+            x, y = next(train_iter)
+
+            optimizer.zero_grad()
+            logits = model(x)
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                y.view(-1),
+            )
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+
+            train_loss_sum += loss.item()
+
+        scheduler.step()
+        model.eval()
+        val_loss_sum = 0.0
+        val_steps = 0
+        with torch.no_grad():
+            for batch_idx, (x, y) in enumerate(val_loader):
+                if batch_idx >= 50:
+                    break
+                logits = model(x)
+                loss = F.cross_entropy(
+                    logits.view(-1, logits.size(-1)),
+                    y.view(-1),
+                )
+                val_loss_sum += loss.item()
+                val_steps += 1
+        model.train()
+
+        train_loss = train_loss_sum / steps_per_epoch
+        val_loss = val_loss_sum / max(1, val_steps)
+        epoch_time_sec = time.time() - epoch_start
+
+        history.append({
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "epoch_time_sec": epoch_time_sec,
+        })
+
+        if epoch in CHECKPOINT_EPOCHS:
+            checkpoint = {
+                "model_state_dict": model.state_dict(),
+                "config": {k: config[k] for k in
+                           ["block_size", "embed_dim", "num_heads",
+                            "num_layers", "mlp_dim", "dropout"]},
+                "epoch": epoch,
+            }
+            torch.save(checkpoint, os.path.join(checkpoint_dir, f"gpt_epoch_{epoch}.pt"))
+    log = {
+        "seed": SEED,
+        "config": config,
+        "history": history,
+        "final_val_loss": history[-1]["val_loss"] if history else None,
+        "total_params": total_params,
+    }
+    with open(log_path, "w") as f:
+        json.dump(log, f, indent=2)
+
+    return log
 
 # ---------------------------------------------------------------------------
 # TODO 1.6  generate
@@ -530,8 +633,21 @@ def generate(
         str : full generated text (prompt + new characters)
     """
     # TODO 1.6: implement
-    raise NotImplementedError
+    device = next(model.parameters()).device
+    encoded = [stoi[ch] for ch in prompt]
+    context = torch.tensor(encoded, dtype=torch.long, device=device).unsqueeze(0)
 
+    model.eval()
+    with torch.no_grad():
+        for _ in range(max_new_tokens):
+            context_cond = context[:, -model.block_size:]
+            logits = model(context_cond)
+            logits_last = logits[:, -1, :] / temperature
+            probs = F.softmax(logits_last, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+            context = torch.cat([context, next_token], dim=1)
+
+    return "".join(itos[int(idx)] for idx in context[0].tolist())
 
 # ---------------------------------------------------------------------------
 # Run-all pipeline  (do not modify)
